@@ -17,12 +17,21 @@ def main():
         print("  ヒント: 管理者権限でコマンドプロンプトを開いて実行してください。")
         sys.exit(1)
 
+    # CSVヘッダー表示（デバッグ用）
+    import csv, io
+    first_line = raw_csv.split("\n", 1)[0]
+    print(f"  CSVヘッダー: {first_line}")
+
     print("[2/4] CSVをパースしてTask構造を生成中...")
     tasks = parse_csv(raw_csv)
     if not tasks:
         print("警告: タスクが1件も取得できませんでした。", file=sys.stderr)
 
     print(f"  → {len(tasks)} タスクを検出")
+    tasks_with_cmd = [t for t in tasks if t.command]
+    print(f"  → うち {len(tasks_with_cmd)} タスクに実行プログラム情報あり")
+    if tasks and not tasks_with_cmd:
+        print("  ※ 実行プログラムが取得できていません。CSVヘッダーを確認してください。")
 
     print("[3/4] タイムライン用インスタンスに展開中...")
     instances = expand_instances(tasks)
