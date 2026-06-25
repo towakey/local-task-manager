@@ -109,6 +109,7 @@ def parse_csv(raw_csv: str) -> List[Task]:
         "Last Run Time":   ["最終実行時刻", "Last Run Time"],
         "Last Result":     ["最終結果", "Last Result"],
         "Status":          ["状態", "Status"],
+        "Task To Run":     ["タスクの実行", "Task To Run"],
     }
 
     def get_field(row: dict, key: str) -> str:
@@ -149,6 +150,9 @@ def parse_csv(raw_csv: str) -> List[Task]:
             duration_min=duration_min,
         )
 
+        # 実行プログラム（フルパス）
+        command = get_field(row, "Task To Run").strip()
+
         # 実行時間推定（方法A: Last Run Time と Next Run Time 差分）
         avg_duration_sec = _estimate_duration(
             get_field(row, "Last Run Time"),
@@ -159,11 +163,15 @@ def parse_csv(raw_csv: str) -> List[Task]:
             tasks_map[task_name] = Task(
                 name=task_name,
                 avg_duration_sec=avg_duration_sec,
+                command=command,
             )
         else:
             # 既存タスクの duration を更新（より良い推定値があれば上書き）
             if avg_duration_sec != DEFAULT_DURATION_SEC:
                 tasks_map[task_name].avg_duration_sec = avg_duration_sec
+            # command が空の場合のみ更新
+            if command and not tasks_map[task_name].command:
+                tasks_map[task_name].command = command
 
         tasks_map[task_name].triggers.append(trigger)
 
