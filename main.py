@@ -2,7 +2,7 @@
 import os
 import sys
 
-from parser import expand_instances, fetch_schtasks_csv, parse_csv
+from task_parser import expand_instances, fetch_schtasks_csv, parse_csv
 from renderer import render_html
 
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "output.html")
