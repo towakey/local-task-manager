@@ -33,13 +33,15 @@ class Task:
         name: str,
         triggers: Optional[List[Trigger]] = None,
         avg_duration_sec: int = 60,
+        command: str = "",
     ):
         self.name = name
         self.triggers: List[Trigger] = triggers if triggers is not None else []
         self.avg_duration_sec = avg_duration_sec  # 推定実行時間（秒）
+        self.command = command  # 実行プログラム（フルパス）
 
     def __repr__(self):
-        return f"Task(name={self.name!r}, triggers={self.triggers})"
+        return f"Task(name={self.name!r}, command={self.command!r}, triggers={self.triggers})"
 
 
 class TaskInstance:

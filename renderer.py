@@ -36,6 +36,7 @@ def render_html(tasks: List[Task], instances: List[TaskInstance]) -> str:
     """TaskInstance リストから HTML文字列を生成する"""
 
     color_map = _assign_colors(tasks)
+    command_map = {task.name: task.command for task in tasks}
 
     # タスク名ごとに行を割り当て（出現順）
     task_names = list(dict.fromkeys(inst.task_name for inst in instances))
@@ -59,11 +60,13 @@ def render_html(tasks: List[Task], instances: List[TaskInstance]) -> str:
         top_offset = row_offset * (BAR_H + 2)
 
         color = color_map.get(inst.task_name, "#4CAF50")
-        tooltip = (
-            f"タスク: {inst.task_name}&#10;"
-            f"開始: {_time_label(inst.start_minute)}&#10;"
-            f"実行時間: {inst.duration_minute}分"
-        )
+        cmd = command_map.get(inst.task_name, "")
+        tooltip_parts = [f"タスク: {inst.task_name}"]
+        if cmd:
+            tooltip_parts.append(f"実行: {cmd}")
+        tooltip_parts.append(f"開始: {_time_label(inst.start_minute)}")
+        tooltip_parts.append(f"実行時間: {inst.duration_minute}分")
+        tooltip = "&#10;".join(tooltip_parts)
 
         bar_html = (
             f'<div class="bar" '
@@ -88,10 +91,12 @@ def render_html(tasks: List[Task], instances: List[TaskInstance]) -> str:
     rows_html = []
     for name in task_names:
         escaped_name = html.escape(name)
+        escaped_cmd = html.escape(command_map.get(name, ""))
         bars = "\n".join(bars_by_task[name])
         row = f"""
-        <div class="row">
+        <div class="row" data-command="{escaped_cmd}">
           <div class="label" title="{escaped_name}">{escaped_name}</div>
+          <div class="cmd-label" title="{escaped_cmd}">{escaped_cmd}</div>
           <div class="bar-container">
             {bars}
           </div>
@@ -148,7 +153,7 @@ h1 {{
   padding: 6px 10px;
   border: 1px solid #ccc;
   border-radius: 4px;
-  width: 320px;
+  width: 420px;
   font-size: 13px;
 }}
 /* ---- タイムライン外枠 ---- */
@@ -160,13 +165,13 @@ h1 {{
   padding-bottom: 8px;
 }}
 .timeline-inner {{
-  min-width: {TIMELINE_W + 180}px;
+  min-width: {TIMELINE_W + 180 + 280}px;
 }}
 /* ---- 時間軸 ---- */
 .hour-axis {{
   position: relative;
   height: 24px;
-  margin-left: 180px;
+  margin-left: {180 + 280}px;
   border-bottom: 2px solid #aaa;
   margin-bottom: 4px;
 }}
@@ -194,6 +199,17 @@ h1 {{
   font-size: 11px;
   padding: 2px 8px;
   color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: {BAR_H}px;
+}}
+.cmd-label {{
+  width: 280px;
+  min-width: 280px;
+  font-size: 10px;
+  padding: 2px 8px;
+  color: #666;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -259,7 +275,7 @@ h1 {{
 <div class="meta">対象タスク数: {len(task_names)} 件 ／ 実行イベント数: {len(instances)} 件</div>
 
 <div id="filter-box">
-  <input id="filter-input" type="text" placeholder="タスク名でフィルタ..." oninput="filterRows(this.value)">
+  <input id="filter-input" type="text" placeholder="タスク名 または 実行プログラムでフィルタ..." oninput="filterRows(this.value)">
 </div>
 
 <div class="timeline-wrapper">
@@ -299,7 +315,9 @@ function filterRows(keyword) {{
     var label = row.querySelector('.label');
     if (!label) return;
     var name = label.textContent.toLowerCase();
-    row.style.display = (!kw || name.indexOf(kw) !== -1) ? '' : 'none';
+    var cmd = (row.getAttribute('data-command') || '').toLowerCase();
+    var match = !kw || name.indexOf(kw) !== -1 || cmd.indexOf(kw) !== -1;
+    row.style.display = match ? '' : 'none';
   }});
 }}
 </script>
