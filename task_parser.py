@@ -109,7 +109,7 @@ def parse_csv(raw_csv: str) -> List[Task]:
         "Last Run Time":   ["最終実行時刻", "Last Run Time"],
         "Last Result":     ["最終結果", "Last Result"],
         "Status":          ["状態", "Status"],
-        "Task To Run":     ["操作", "タスクの実行", "Task To Run"],
+        "Task To Run":     ["実行するタスク", "操作", "タスクの実行", "Task To Run"],
     }
 
     def get_field(row: dict, key: str) -> str:
