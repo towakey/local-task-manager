@@ -2,14 +2,20 @@
 import os
 import sys
 
-from task_parser import expand_instances, fetch_schtasks_csv, parse_csv
+from task_parser import (
+    apply_eventlog_durations,
+    expand_instances,
+    fetch_eventlog_durations,
+    fetch_schtasks_csv,
+    parse_csv,
+)
 from renderer import render_html
 
 OUTPUT_FILE = os.path.join(os.path.dirname(__file__), "output.html")
 
 
 def main():
-    print("[1/4] schtasks からタスク情報を取得中...")
+    print("[1/5] schtasks からタスク情報を取得中...")
     try:
         raw_csv = fetch_schtasks_csv()
     except Exception as e:
@@ -22,7 +28,7 @@ def main():
     first_line = raw_csv.split("\n", 1)[0]
     print(f"  CSVヘッダー: {first_line}")
 
-    print("[2/4] CSVをパースしてTask構造を生成中...")
+    print("[2/5] CSVをパースしてTask構造を生成中...")
     tasks = parse_csv(raw_csv)
     if not tasks:
         print("警告: タスクが1件も取得できませんでした。", file=sys.stderr)
@@ -33,11 +39,22 @@ def main():
     if tasks and not tasks_with_cmd:
         print("  ※ 実行プログラムが取得できていません。CSVヘッダーを確認してください。")
 
-    print("[3/4] タイムライン用インスタンスに展開中...")
+    print("[3/5] イベントログから実行履歴を取得中...")
+    try:
+        durations = fetch_eventlog_durations()
+        if durations:
+            applied = apply_eventlog_durations(tasks, durations)
+            print(f"  → {len(durations)} 件の実行履歴を取得、{applied} タスクに適用")
+        else:
+            print("  → イベントログから実行履歴を取得できませんでした（fallback使用）")
+    except Exception as e:
+        print(f"  → イベントログ取得スキップ: {e}")
+
+    print("[4/5] タイムライン用インスタンスに展開中...")
     instances = expand_instances(tasks)
     print(f"  → {len(instances)} 件の実行イベントを生成")
 
-    print("[4/4] HTMLを生成・出力中...")
+    print("[5/5] HTMLを生成・出力中...")
     html_content = render_html(tasks, instances)
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:

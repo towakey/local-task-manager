@@ -1,9 +1,11 @@
-# parser.py
+# task_parser.py
 import csv
 import datetime
 import io
+import re
 import subprocess
-from typing import List, Optional
+import xml.etree.ElementTree as ET
+from typing import Dict, List, Optional, Tuple
 
 from model import Task, TaskInstance, Trigger
 
@@ -56,7 +58,6 @@ def _parse_interval_minutes(value: str) -> Optional[int]:
     if not value or value.upper() in ("N/A", "無効", "DISABLED"):
         return None
     minutes = 0
-    import re
     m = re.search(r"(\d+)\s*Hour", value, re.IGNORECASE)
     if m:
         minutes += int(m.group(1)) * 60
@@ -178,6 +179,27 @@ def parse_csv(raw_csv: str) -> List[Task]:
     return list(tasks_map.values())
 
 
+def apply_eventlog_durations(tasks: List[Task], durations: Dict[str, int]) -> int:
+    """
+    イベントログから取得した実行時間をタスクに適用する。
+    Returns: 適用したタスク数
+    """
+    applied = 0
+    for task in tasks:
+        # イベントログのタスク名は "\folder\name" 形式
+        if task.name in durations:
+            task.avg_duration_sec = durations[task.name]
+            applied += 1
+        else:
+            # 末尾のタスク名部分でマッチを試みる
+            for ev_name, dur in durations.items():
+                if ev_name.endswith(task.name) or task.name.endswith(ev_name):
+                    task.avg_duration_sec = dur
+                    applied += 1
+                    break
+    return applied
+
+
 def _estimate_duration(last_run_str: str, next_run_str: str) -> int:
     """
     方法A: Last Run Time と Next Run Time の差から推定。
@@ -201,6 +223,126 @@ def _estimate_duration(last_run_str: str, next_run_str: str) -> int:
         except (ValueError, AttributeError):
             continue
     return DEFAULT_DURATION_SEC
+
+
+# ---------------------------------------------------------------------------
+# イベントログから実行履歴を取得
+# ---------------------------------------------------------------------------
+
+def fetch_eventlog_durations() -> Dict[str, int]:
+    """
+    Windowsイベントログ（TaskScheduler/Operational）から
+    タスクごとの前回実行時間（秒）を取得する。
+
+    EventID 100 = タスク開始
+    EventID 102 = タスク完了
+
+    Returns:
+        {task_name: duration_sec} の辞書。取得できない場合は空辞書。
+    """
+    try:
+        xml_str = subprocess.check_output(
+            [
+                "wevtutil", "qe",
+                "Microsoft-Windows-TaskScheduler/Operational",
+                "/q:*[System[(EventID=100 or EventID=102)]]",
+                "/c:2000",
+                "/rd:true",
+                "/f:xml",
+            ],
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return {}
+
+    for enc in ("cp932", "utf-8-sig", "utf-8"):
+        try:
+            decoded = xml_str.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        return {}
+
+    # wevtutilの出力は複数の<Event>要素が並ぶがルート要素がない
+    decoded = "<Events>" + decoded + "</Events>"
+    # XML名前空間を除去（パースを簡素化）
+    decoded = re.sub(r'\sxmlns(:[^=]*)?="[^"]*"', '', decoded)
+
+    try:
+        root = ET.fromstring(decoded)
+    except ET.ParseError:
+        return {}
+
+    # イベントを収集: (task_name, event_id, timestamp)
+    events = []  # type: List[Tuple[str, int, datetime.datetime]]
+    for event_el in root.findall(".//Event"):
+        system_el = event_el.find("System")
+        if system_el is None:
+            continue
+        event_id_el = system_el.find("EventID")
+        time_el = system_el.find("TimeCreated")
+        if event_id_el is None or time_el is None:
+            continue
+
+        try:
+            event_id = int(event_id_el.text)
+        except (ValueError, TypeError):
+            continue
+
+        time_str = time_el.get("SystemTime", "")
+        if not time_str:
+            continue
+
+        # ISO 8601 形式: 2024-01-15T08:30:00.1234567Z
+        time_str = time_str.replace("Z", "+00:00")
+        # ナノ秒精度をマイクロ秒に丸める（Python 3.7互換）
+        time_str = re.sub(r'(\d{2}:\d{2}:\d{2})\.\d+', r'\1', time_str)
+        try:
+            ts = datetime.datetime.fromisoformat(time_str)
+        except (ValueError, AttributeError):
+            continue
+
+        # EventDataからタスク名を取得
+        event_data = event_el.find("EventData")
+        task_name = ""
+        if event_data is not None:
+            for data_el in event_data.findall("Data"):
+                if data_el.get("Name") == "TaskName":
+                    task_name = (data_el.text or "").strip()
+                    break
+        if not task_name:
+            continue
+
+        events.append((task_name, event_id, ts))
+
+    # タスク名ごとに最新の開始(100)・完了(102)ペアを見つけてdurationを計算
+    # イベントは新しい順に取得済み（/rd:true）
+    durations = {}  # type: Dict[str, int]
+    # タスク名ごとに最新の完了イベントを見つけ、その直前の開始イベントとペアリング
+    task_events = {}  # type: Dict[str, List[Tuple[int, datetime.datetime]]]
+    for task_name, event_id, ts in events:
+        if task_name not in task_events:
+            task_events[task_name] = []
+        task_events[task_name].append((event_id, ts))
+
+    for task_name, evts in task_events.items():
+        # 時系列順にソート（古い順）
+        evts.sort(key=lambda x: x[1])
+        last_start = None  # type: Optional[datetime.datetime]
+        last_duration = None  # type: Optional[int]
+        for event_id, ts in evts:
+            if event_id == 100:
+                last_start = ts
+            elif event_id == 102 and last_start is not None:
+                diff = (ts - last_start).total_seconds()
+                if 0 < diff <= 86400:  # 0秒超〜24時間以内
+                    last_duration = int(diff)
+                last_start = None
+        if last_duration is not None:
+            durations[task_name] = last_duration
+
+    return durations
 
 
 # ---------------------------------------------------------------------------

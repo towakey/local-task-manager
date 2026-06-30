@@ -221,6 +221,19 @@ h1 {{
   min-width: {TIMELINE_W}px;
   height: {ROW_H}px;
 }}
+/* ---- タイムライン行全体のグリッド線コンテナ ---- */
+#timeline-rows {{
+  position: relative;
+}}
+.rows-grid-line {{
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: #d0d0d0;
+  pointer-events: none;
+  z-index: 1;
+}}
 /* ---- バー ---- */
 .bar {{
   position: absolute;
@@ -298,13 +311,22 @@ h1 {{
 
 <script>
 (function() {{
-  // 縦グリッド線を動的に描画
+  // 時間軸の縦グリッド線
   var axis = document.getElementById('hour-axis');
   for (var h = 0; h <= 24; h++) {{
     var line = document.createElement('div');
     line.className = 'grid-line';
     line.style.left = (h * 60) + 'px';
     axis.appendChild(line);
+  }}
+  // タイムライン行全体に1時間ごとの縦線を描画
+  var rows = document.getElementById('timeline-rows');
+  var labelW = 180 + 280;
+  for (var h = 0; h <= 24; h++) {{
+    var line = document.createElement('div');
+    line.className = 'rows-grid-line';
+    line.style.left = (labelW + h * 60) + 'px';
+    rows.appendChild(line);
   }}
 }})();
 
